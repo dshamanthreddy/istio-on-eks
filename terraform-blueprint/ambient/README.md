@@ -114,13 +114,21 @@ kubectl port-forward svc/grafana 3000:3000 -n istio-system
 
 ### Deploy Sample EKS Application
 
-To demonstrate some of the features of Istio, deploy a retail store sample application. This sample application uses a microservices architecture with components written in various programming languages and uses a variety of data stores. By default, the UI service is set to type=LoadBalancer, but you update this to ClusterIP and let Istio handle traffic into the cluster later. Run the following commands in a second terminal session.
+To demonstrate Istio's capabilities, deploy the [retail store sample application](https://github.com/aws-containers/retail-store-sample-app). This microservices-based app includes components written in various programming languages with different data stores. By default, the UI service is set to `LoadBalancer`, but you'll update it to `ClusterIP` and let Istio handle traffic into the cluster via the Gateway API. Run the following commands in a second terminal session.
+
+#### Cart
 
 ```sh
 helm install cart oci://public.ecr.aws/aws-containers/retail-store-sample-cart-chart --version 1.3.0
+```
 
+#### Catalog
+
+```sh
 helm install catalog oci://public.ecr.aws/aws-containers/retail-store-sample-catalog-chart --version 1.3.0
 ```
+
+#### Checkout
 
 ```sh
 cat > checkout-values.yaml <<EOF
@@ -134,163 +142,141 @@ app:
 EOF
 ```
 
-<!-- 1. Create the `sample` namespace and enable the sidecar injection on it
+```sh
+helm install -f checkout-values.yaml checkout oci://public.ecr.aws/aws-containers/retail-store-sample-checkout-chart --version 1.3.0
+```
 
-    ```sh
-    kubectl create namespace sample
-    kubectl label namespace sample istio.io/dataplane-mode=ambient
-    ```
+#### Orders
 
-    ```text
-    namespace/sample created
-    namespace/sample labeled
-    ```
+```sh
+helm install orders oci://public.ecr.aws/aws-containers/retail-store-sample-orders-chart --version 1.3.0
+```
 
-2. Deploy `helloworld` app
+#### UI
 
-    ```sh
-    cat <<EOF | kubectl apply -n sample -f -
-    apiVersion: v1
-    kind: Service
+```sh
+cat > ui-values.yaml <<EOF
+app:
+  endpoints:
+    carts: http://cart-carts:80
+    catalog: http://catalog:80
+    checkout: http://checkout:80
+    orders: http://orders:80
+EOF
+```
+
+```sh
+helm install -f ui-values.yaml ui oci://public.ecr.aws/aws-containers/retail-store-sample-ui-chart --version 1.3.0
+```
+
+```sh
+kubectl wait --for=condition=Ready --timeout=120s pods --all
+```
+
+#### Expose the Application using Kubernetes Gateway API
+
+Use the Kubernetes Gateway API (installed above) to expose the retail store application and route external traffic into the cluster through Istio. This creates a Gateway with an NLB, scoped to your IP, and an HTTPRoute to the UI service.
+
+```sh
+export USER_IP=$(curl https://checkip.amazonaws.com/)
+
+cat <<EOF | envsubst | kubectl apply -f -
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: retail-store-gateway
+  namespace: istio-ingress
+spec:
+  gatewayClassName: istio
+  infrastructure:
+    parametersRef:
+      group: ""
+      kind: ConfigMap
+      name: retail-store-gateway-options
+  listeners:
+  - name: http
+    port: 80
+    protocol: HTTP
+    allowedRoutes:
+      namespaces:
+        from: All
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: retail-store-gateway-options
+  namespace: istio-ingress
+data:
+  service: |
     metadata:
-      name: helloworld
-      labels:
-        app: helloworld
-        service: helloworld
+      annotations:
+        service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+        service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+        service.beta.kubernetes.io/aws-load-balancer-attributes: load_balancing.cross_zone.enabled=true
     spec:
-      ports:
-      - port: 5000
-        name: http
-      selector:
-        app: helloworld
-    ---
-    apiVersion: apps/v1
-    kind: Deployment
-    metadata:
-      name: helloworld-v1
-      labels:
-        app: helloworld
-        version: v1
-    spec:
-      replicas: 1
-      selector:
-        matchLabels:
-          app: helloworld
-          version: v1
-      template:
-        metadata:
-          labels:
-            app: helloworld
-            version: v1
-        spec:
-          containers:
-          - name: helloworld
-            image: docker.io/istio/examples-helloworld-v1
-            resources:
-              requests:
-                cpu: "100m"
-            imagePullPolicy: IfNotPresent #Always
-            ports:
-            - containerPort: 5000
-    EOF
-    ```
+      loadBalancerSourceRanges:
+        - ${USER_IP}/32
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: retail-store-httproute
+  namespace: default
+spec:
+  parentRefs:
+  - name: retail-store-gateway
+    namespace: istio-ingress
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: ui
+      port: 80
+EOF
+```
 
-    ```text
-    service/helloworld created
-    deployment.apps/helloworld-v1 created
-    ```
+Wait for the load balancer to finish provisioning, then verify the application is reachable:
 
-3. Deploy `sleep` app that we will use to connect to `helloworld` app
+```sh
+curl --head -X GET --retry 30 --retry-all-errors --retry-delay 15 --connect-timeout 30 --max-time 60 \
+  -k $(kubectl get gateway retail-store-gateway -n istio-ingress -ojsonpath='{.status.addresses[0].value}')
+```
 
-    ```sh
-    cat <<EOF | kubectl apply -n sample -f -
-    apiVersion: v1
-    kind: ServiceAccount
-    metadata:
-      name: sleep
-    ---
-    apiVersion: v1
-    kind: Service
-    metadata:
-      name: sleep
-      labels:
-        app: sleep
-        service: sleep
-    spec:
-      ports:
-      - port: 80
-        name: http
-      selector:
-        app: sleep
-    ---
-    apiVersion: apps/v1
-    kind: Deployment
-    metadata:
-      name: sleep
-    spec:
-      replicas: 1
-      selector:
-        matchLabels:
-          app: sleep
-      template:
-        metadata:
-          labels:
-            app: sleep
-        spec:
-          terminationGracePeriodSeconds: 0
-          serviceAccountName: sleep
-          containers:
-          - name: sleep
-            image: curlimages/curl
-            command: ["/bin/sleep", "infinity"]
-            imagePullPolicy: IfNotPresent
-            volumeMounts:
-            - mountPath: /etc/sleep/tls
-              name: secret-volume
-          volumes:
-          - name: secret-volume
-            secret:
-              secretName: sleep-secret
-              optional: true
-    EOF
-    ```
+#### Add Workloads to the Ambient Mesh
 
-    ```text
-    serviceaccount/sleep created
-    service/sleep created
-    deployment.apps/sleep created
-    ```
+To verify that workloads in the default namespace are included in the ambient mesh, label the namespace:
 
-4. Check all the pods in the `sample` namespace
+```sh
+kubectl label namespace default istio.io/dataplane-mode=ambient
+```
 
-    ```sh
-    kubectl get pods -n sample
-    ```
-    
-    ```text
-    NAME                             READY   STATUS    RESTARTS   AGE
-    helloworld-v1-64674bb6c8-5szqq   1/1     Running   0          26s
-    sleep-5577c64d7c-htrf8           1/1     Running   0          10s
-    ```
+Run the following commands to get the URL to access the example retail store application:
 
-5. Connect to `helloworld` app from `sleep` app and verify if the connection uses envoy proxy
-
-    ```sh
-    kubectl exec -n sample -c sleep \
-        "$(kubectl get pod -n sample -l \
-        app=sleep -o jsonpath='{.items[0].metadata.name}')" \
-        -- curl -sv helloworld.sample:5000/hello
-    ```
-
-    ```text
-    * Host helloworld.sample:5000 was resolved.
-    ...
-    * Connection #0 to host helloworld.sample left intact
-    Hello version: v1, instance: helloworld-v1-64674bb6c8-43qfx
-    ``` -->
+```sh
+export NLB_HOST=$(kubectl get gateway retail-store-gateway -n istio-ingress -ojsonpath='{.status.addresses[0].value}')
+echo http://$NLB_HOST
+```
 
 ## Destroy
 
+Clean up the sample application resources before destroying the infrastructure:
+
+```sh
+kubectl delete HTTPRoute retail-store-httproute
+kubectl delete Gateway retail-store-gateway -n istio-ingress
+kubectl delete cm retail-store-gateway-options -n istio-ingress
+
+helm uninstall ui
+helm uninstall orders
+helm uninstall checkout
+helm uninstall catalog
+helm uninstall cart
+
+rm checkout-values.yaml
+rm ui-values.yaml
+```
 
 ```sh
 terraform destroy --auto-approve

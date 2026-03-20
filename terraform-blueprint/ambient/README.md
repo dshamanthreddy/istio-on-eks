@@ -1,11 +1,9 @@
-# Amazon EKS Cluster w/ Istio (`Ambient` mode)
+# Amazon EKS Auto Mode Cluster w/ Istio (`Ambient` mode)
 
-This example demonstrates provisioning an EKS cluster with Istio in `Ambient` mode.
+This example demonstrates provisioning an EKS Auto Mode cluster with Istio in `Ambient` mode.
 
-- Deploy an EKS Cluster with one managed node group in a VPC.
-- Add node_security_group rules for port access required for Istio communication.
+- Deploy an EKS Auto Mode cluster in a VPC. Auto Mode automatically manages compute, networking, and security group configurations.
 - Install Istio in `Ambient` mode using Helm resources in Terraform.
-- Install Istio Ingress Gateway using Helm resources in Terraform. This step deploys a Service of type `LoadBalancer` that creates an AWS Network Load Balancer.
 - Deploy/Validate Istio communication using a sample application.
 
 Refer to the [Istio documentation](https://istio.io/latest/docs/concepts/) for detailed explanations of Istio concepts.
@@ -15,8 +13,10 @@ Refer to the [Istio documentation](https://istio.io/latest/docs/concepts/) for d
 Refer to the [prerequisites](https://aws-ia.github.io/terraform-aws-eks-blueprints/getting-started/#prerequisites) and run the following command to deploy this pattern:
 
 ```sh
+cd terraform-blueprint/ambient
 terraform init
 terraform apply --auto-approve
+aws eks --region us-west-2 update-kubeconfig --name ambient
 ```
 
 Once the resources have been provisioned, you will need to replace the `istio-ingress` pods due to a [`istiod` dependency issue](https://github.com/istio/istio/issues/35789). Use the following command to perform a rolling restart of the `istio-ingress` pods:
@@ -27,16 +27,30 @@ kubectl rollout restart deployment istio-ingress -n istio-ingress
 
 ### Observability Add-ons
 
-Use the following code snippet to add the Istio Observability Add-ons on the EKS
-cluster with deployed Istio.
+Use the following code snippet to add the Istio Observability Add-ons (Kiali and Prometheus) on the EKS cluster with deployed Istio.
 
 ```sh
-for ADDON in kiali jaeger prometheus grafana
-do
-    ADDON_URL="https://raw.githubusercontent.com/istio/istio/release-1.22/samples/addons/$ADDON.yaml"
-    kubectl apply -f $ADDON_URL
-done
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.28/samples/addons/prometheus.yaml \
+  -f https://raw.githubusercontent.com/istio/istio/release-1.28/samples/addons/kiali.yaml
 ```
+
+### Kubernetes Gateway API CRDs (Optional)
+
+EKS clusters don't include [Kubernetes Gateway API](https://gateway-api.sigs.k8s.io/) custom resource definitions (CRDs) by default. The Gateway API is an open source standard interface for Kubernetes application networking and represents the next generation of managing ingress and service mesh traffic within a cluster. Istio supports the Kubernetes Gateway API, and you need these resources to allow ingress traffic into your cluster and to manage ambient mesh traffic.
+
+> **Note:** There is a Gateway resource in the Istio APIs, but this walkthrough doesn't use that resource. There are [key differences](https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/) between the two.
+
+Install the Gateway API CRDs if they are not already present on your cluster:
+
+```sh
+kubectl get crd gateways.gateway.networking.k8s.io &> /dev/null || \
+  kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.4.0/standard-install.yaml
+```
+
+**Why do you need this?**
+
+- **Gateway**: A Gateway helps route traffic from outside the cluster to services running within it. Each Gateway is associated with a GatewayClass, which indicates the gateway controller (in this case, Istio) that handles the traffic for that Gateway. By default, Istio creates a ServiceAccount, Service, and Deployment that correspond to the Gateway configuration. If you need to adjust the settings of the underlying resources, you can create a ConfigMap and associate it with the Gateway resource.
+- **HTTPRoute**: Route resources define rules for mapping requests through a Gateway to backend Kubernetes services. The HTTPRoute is specifically for the HTTP protocol and routes requests to your application services (e.g., the UI service).
 
 ## Validate
 
@@ -277,25 +291,7 @@ kubectl port-forward svc/tracing 16686:80 -n istio-system
 
 ## Destroy
 
-The AWS Load Balancer Controller add-on asynchronously reconciles resource deletions.
-During stack destruction, the istio ingress resource and the load balancer controller
-add-on are deleted in quick succession, preventing the removal of some of the AWS
-resources associated with the ingress gateway load balancer like, the frontend and the
-backend security groups.
-This causes the final `terraform destroy -auto-approve` command to timeout and fail with VPC dependency errors like below:
-
-```text
-│ Error: deleting EC2 VPC (vpc-XXXX): operation error EC2: DeleteVpc, https response error StatusCode: 400, RequestID: XXXXX-XXXX-XXXX-XXXX-XXXXXX, api error DependencyViolation: The vpc 'vpc-XXXX' has dependencies and cannot be deleted.
-```
-
-A possible workaround is to manually uninstall the `istio-ingress` helm chart.
 
 ```sh
-terraform destroy -target='module.eks_blueprints_addons.helm_release.this["istio-ingress"]' -auto-approve
+terraform destroy --auto-approve
 ```
-
-Once the chart is uninstalled move on to destroy the stack.
-
-{%
-   include-markdown "../../docs/_partials/destroy.md"
-%}

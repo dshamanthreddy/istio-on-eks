@@ -58,35 +58,25 @@ kubectl get crd gateways.gateway.networking.k8s.io &> /dev/null || \
 
     ```sh
     kubectl get pods,svc -n istio-system
-    kubectl get pods,svc -n istio-ingress
     ```
 
     ```text
-    NAME                              READY   STATUS    RESTARTS   AGE
-    pod/grafana-657df88ffd-89nxn      1/1     Running   0          16s
-    pod/istio-cni-node-42mjk          1/1     Running   0          22m
-    pod/istio-cni-node-24ctm          1/1     Running   0          22m
-    pod/istiod-6768c599c5-6rwd9       1/1     Running   0          23m
-    pod/jaeger-697d898d6-32gsr        1/1     Running   0          22s
-    pod/kiali-5899548ff7-1xx5h        1/1     Running   0          24s
-    pod/prometheus-777db476b6-3gvg7   2/2     Running   0          18s
-    pod/ztunnel-56s7h                 1/1     Running   0          22m
-    pod/ztunnel-7wbr5                 1/1     Running   0          22m
+    NAMESPACE      NAME                          READY   STATUS    RESTARTS   AGE
+    istio-system   grafana-6c689999f9-5lk9b      1/1     Running   0          37s
+    istio-system   istio-cni-node-28w2s          1/1     Running   0          10m
+    istio-system   istio-cni-node-v4fc8          1/1     Running   0          12m
+    istio-system   istiod-759544898-n84g5        1/1     Running   0          12m
+    istio-system   kiali-95cffb658-8dp42         1/1     Running   0          10m
+    istio-system   prometheus-6bd68c5c99-z6flt   2/2     Running   0          10m
+    istio-system   ztunnel-82xvq                 1/1     Running   0          12m
+    istio-system   ztunnel-csb26                 1/1     Running   0          10m
 
-    NAME                       TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                                          AGE
-    service/grafana            ClusterIP   172.20.79.2      <none>        3000/TCP                                         16s
-    service/istiod             ClusterIP   172.20.90.17     <none>        15010/TCP,15012/TCP,443/TCP,15014/TCP            23m
-    service/jaeger-collector   ClusterIP   172.20.221.206   <none>        14268/TCP,14250/TCP,9411/TCP,4317/TCP,4318/TCP   21s
-    service/kiali              ClusterIP   172.20.241.225   <none>        20001/TCP,9090/TCP                               24s
-    service/prometheus         ClusterIP   172.20.39.12     <none>        9090/TCP                                         18s
-    service/tracing            ClusterIP   172.20.195.31    <none>        80/TCP,16685/TCP                                 22s
-    service/zipkin             ClusterIP   172.20.92.216    <none>        9411/TCP                                         22s
-    NAME                                READY   STATUS    RESTARTS   AGE
-    pod/istio-ingress-94f46b75b-w5pch   1/1     Running   0          22m
+    NAME                 TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                                 AGE
+    service/grafana      ClusterIP   172.20.210.200   <none>        3000/TCP                                2m14s
+    service/istiod       ClusterIP   172.20.80.137    <none>        15010/TCP,15012/TCP,443/TCP,15014/TCP   14m
+    service/kiali        ClusterIP   172.20.65.49     <none>        20001/TCP,9090/TCP                      12m
+    service/prometheus   ClusterIP   172.20.141.251   <none>        9090/TCP                                12m
 
-    NAME                    TYPE           CLUSTER-IP       EXTERNAL-IP                                                                     PORT(S)                                      AGE
-    service/istio-ingress   LoadBalancer   172.20.249.189   k8s-istioing-istioing-21ba5f8e50-56515edc7fdae5d5.elb.us-west-2.amazonaws.com   15021:32477/TCP,80:32556/TCP,443:32006/TCP   23m
-    ```
 
 2. Verify all the Helm releases installed in the `istio-system` and `istio-ingress` namespaces:
 
@@ -95,21 +85,13 @@ kubectl get crd gateways.gateway.networking.k8s.io &> /dev/null || \
     ```
 
     ```text
-    NAME            NAMESPACE       REVISION        UPDATED                                 STATUS          CHART               APP VERSION
-    istio-base      istio-system    1               2024-06-03 15:49:08.443242104 -0700 PDT deployed        base-1.22.0         1.22.0
-    istio-cni       istio-system    1               2024-06-03 15:49:02.186964057 -0700 PDT deployed        cni-1.22.0          1.22.0
-    istiod          istio-system    1               2024-06-03 15:49:07.609140674 -0700 PDT deployed        istiod-1.22.0       1.22.0
-    ztunnel         istio-system    1               2024-06-03 15:49:11.624277009 -0700 PDT deployed        ztunnel-1.22.0      1.22.0
+    NAME            NAMESPACE       REVISION        UPDATED                                 STATUS          CHART             APP VERSION
+    istio-base      istio-system    1               2026-03-19 21:14:27.275765 -0400 EDT    deployed        base-1.28.1       1.28.1
+    istio-cni       istio-system    1               2026-03-19 21:14:19.6922 -0400 EDT      deployed        cni-1.28.1        1.28.1
+    istiod          istio-system    1               2026-03-19 21:14:17.901337 -0400 EDT    deployed        istiod-1.28.1     1.28.1
+    ztunnel         istio-system    1               2026-03-19 21:14:23.912003 -0400 EDT    deployed        ztunnel-1.28.1    1.28.1
     ```
 
-    ```sh
-    helm list -n istio-ingress
-    ```
-
-    ```text
-    NAME            NAMESPACE       REVISION        UPDATED                                 STATUS          CHART               APP VERSION
-    istio-ingress   istio-ingress   1               2024-06-03 15:49:14.784086208 -0700 PDT deployed        gateway-1.22.0      1.22.0
-    ```
 
 ### Observability Add-ons
 
@@ -128,13 +110,31 @@ kubectl port-forward svc/prometheus 9090:9090 -n istio-system
 # Visualize metrics in using Grafana
 kubectl port-forward svc/grafana 3000:3000 -n istio-system
 
-# Visualize application traces via Jaeger
-kubectl port-forward svc/tracing 16686:80 -n istio-system
 ```
 
-### Example
+### Deploy Sample EKS Application
 
-1. Create the `sample` namespace and enable the sidecar injection on it
+To demonstrate some of the features of Istio, deploy a retail store sample application. This sample application uses a microservices architecture with components written in various programming languages and uses a variety of data stores. By default, the UI service is set to type=LoadBalancer, but you update this to ClusterIP and let Istio handle traffic into the cluster later. Run the following commands in a second terminal session.
+
+```sh
+helm install cart oci://public.ecr.aws/aws-containers/retail-store-sample-cart-chart --version 1.3.0
+
+helm install catalog oci://public.ecr.aws/aws-containers/retail-store-sample-catalog-chart --version 1.3.0
+```
+
+```sh
+cat > checkout-values.yaml <<EOF
+redis:
+  create: true
+app:
+  persistence:
+    provider: redis
+  endpoints:
+    orders: 'http://orders:80'
+EOF
+```
+
+<!-- 1. Create the `sample` namespace and enable the sidecar injection on it
 
     ```sh
     kubectl create namespace sample
@@ -287,7 +287,7 @@ kubectl port-forward svc/tracing 16686:80 -n istio-system
     ...
     * Connection #0 to host helloworld.sample left intact
     Hello version: v1, instance: helloworld-v1-64674bb6c8-43qfx
-    ```
+    ``` -->
 
 ## Destroy
 

@@ -216,7 +216,12 @@ data:
     spec:
       loadBalancerSourceRanges:
         - ${USER_IP}/32
----
+EOF
+```
+> **Note:** Security - Since this NLB is internet-facing, `loadBalancerSourceRanges` restricts the NLB's security group to only allow inbound traffic from your public IP (`${USER_IP}/32`). Without this, the NLB would be open to `0.0.0.0/0`.
+
+```sh
+kubectl apply -f - <<EOF
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -224,17 +229,18 @@ metadata:
   namespace: default
 spec:
   parentRefs:
-  - name: retail-store-gateway
-    namespace: istio-ingress
+    - name: retail-store-gateway
+      namespace: istio-ingress
   rules:
-  - matches:
-    - path:
-        type: PathPrefix
-        value: /
-    backendRefs:
-    - name: ui
-      port: 80
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: ui
+          port: 80
 EOF
+
 ```
 
 Wait for the load balancer to finish provisioning, then verify the application is reachable:

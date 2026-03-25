@@ -19,11 +19,7 @@ terraform apply --auto-approve
 aws eks --region us-west-2 update-kubeconfig --name ambient
 ```
 
-Once the resources have been provisioned, you will need to replace the `istio-ingress` pods due to a [`istiod` dependency issue](https://github.com/istio/istio/issues/35789). Use the following command to perform a rolling restart of the `istio-ingress` pods:
 
-```sh
-kubectl rollout restart deployment istio-ingress -n istio-ingress
-```
 
 ### Observability Add-ons
 
@@ -175,7 +171,7 @@ kubectl wait --for=condition=Ready --timeout=120s pods --all
 
 #### Expose the Application using Kubernetes Gateway API
 
-Use the Kubernetes Gateway API (installed above) to expose the retail store application and route external traffic into the cluster through Istio. This creates a Gateway with an NLB, scoped to your IP, and an HTTPRoute to the UI service.
+Use the Kubernetes Gateway API (installed above) to expose the retail store application and route external traffic into the cluster through Istio. This creates a Gateway with an NLB, scoped to your IP.
 
 ```sh
 export USER_IP=$(curl https://checkip.amazonaws.com/)
@@ -218,8 +214,13 @@ data:
         - ${USER_IP}/32
 EOF
 ```
-> **Note:** Security - Since this NLB is internet-facing, `loadBalancerSourceRanges` restricts the NLB's security group to only allow inbound traffic from your public IP (`${USER_IP}/32`). Without this, the NLB would be open to `0.0.0.0/0`.
 
+> **Note:** Security - Since this NLB is internet-facing, `loadBalancerSourceRanges` restricts the NLB's security group to only allow inbound traffic from your public IP (`${USER_IP}/32`). Without this, the NLB would be open to `0.0.0.0/0`. You can verify this in the AWS Console under **EC2 → Load Balancers → Security → Inbound rules**, where `loadBalancerSourceRanges` gets translated into a security group inbound rule scoped to your IP, below is the reference.
+
+![loadBalancerSourceRanges Security Group](../../images/loadBalancerSourceRanges.png)
+
+
+#### HTTPRoute to expose the UI service
 ```sh
 kubectl apply -f - <<EOF
 apiVersion: gateway.networking.k8s.io/v1
@@ -240,7 +241,6 @@ spec:
         - name: ui
           port: 80
 EOF
-
 ```
 
 Wait for the load balancer to finish provisioning, then verify the application is reachable:
@@ -249,6 +249,21 @@ Wait for the load balancer to finish provisioning, then verify the application i
 curl --head -X GET --retry 30 --retry-all-errors --retry-delay 15 --connect-timeout 30 --max-time 60 \
   -k $(kubectl get gateway retail-store-gateway -n istio-ingress -ojsonpath='{.status.addresses[0].value}')
 ```
+
+#### Response
+```sh
+HTTP/1.1 200 OK
+content-type: text/html
+content-language: en-US
+set-cookie: SESSIONID=e3bf2d47-6604-40ba-93e6-8e3efb5d115f
+content-length: 19973
+x-envoy-upstream-service-time: 636
+date: Tue, 24 Mar 2026 23:51:35 GMT
+server: istio-envoy
+
+Time: 0h:00m:04s
+```
+
 
 #### Add Workloads to the Ambient Mesh
 
